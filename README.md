@@ -7,3 +7,5 @@
      * 그 둘이 사진과 일치하게 만들어졌는지 확인할 필요 있음
 2. requirements.txt에 있는 패키지 전부 다운로드 필수
    * pip install -r requirements.txt
+3. .evn 파일이 따로 필요함
+  * 프로젝트에서 사용하는 API KEY가 들어있는 파일임    
