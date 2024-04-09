@@ -8,10 +8,12 @@ from langchain.prompts import ChatPromptTemplate
 import streamlit as st
 import os
 from langchain.storage import LocalFileStore
+import pickle
 
 project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-faq_caching_file_path = os.path.join(project_root_path, '.cache/lifecard')
-faq_caching_file_path_langchain = LocalFileStore("./.cache/lifecard/")
+faq_caching_embedding_check_path = os.path.join(project_root_path, '.cache/lifecard')
+faq_caching_embedding_path = LocalFileStore("./.cache/lifecard/")
+faq_caching_web_cache_path_pickle = os.path.join(project_root_path, '.cache/lifecard_faq_web/lifecard_faq_web.pkl')
 life_faq_sitemap_url = "https://lifecard.dga.jp/sitemap.xml"
 
 llm = ChatOpenAI(
@@ -37,6 +39,15 @@ answers_prompt = ChatPromptTemplate.from_template(
 """
 )
 
+def save_loaded_data(data, path):
+    with open(path, 'wb') as file:
+        pickle.dump(data, file)
+
+
+def open_loaded_data(path):
+    with open(path, 'rb') as file:
+        pickle.load(file)
+
 
 def parse_page(soup):
     target_soup = soup.find('div', class_="faq-box")
@@ -51,23 +62,26 @@ def parse_page(soup):
 
 @st.cache_data(show_spinner="WebページからFAQデータを更新中")
 def load_website(url):
-    st.write(faq_caching_file_path)
-    cache_file_list = os.listdir(faq_caching_file_path)
-    # 캐싱된 데이터가 없으면 웹에서 새로운 데이터를 로드한다.
-    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=200)
-    loader = SitemapLoader(url, parsing_function=parse_page)
-    loader.requests_per_second = 2
-    docs = loader.load_and_split(text_splitter=splitter)
-    cached_embeddings = CacheBackedEmbeddings.from_bytes_store(OpenAIEmbeddings(), faq_caching_file_path_langchain)
-    vector_store = FAISS.from_documents(docs, cached_embeddings)
-    return vector_store.as_retriever(search_kwargs={"k": 3})
+    st.write(faq_caching_embedding_check_path)
+    cache_file_list = os.listdir(faq_caching_embedding_check_path)
     # if cache_file_list:
-    #     # 캐싱된 데이터가 있는지 확인
+    #     # 캐싱된 데이터가 있을 경우
     #     cached_embeddings = CacheBackedEmbeddings.from_bytes_store(OpenAIEmbeddings(), faq_caching_file_path_langchain)
     #     cached_docs = cached_embeddings.docs
     #     vector_store = FAISS.from_documents(cached_docs, cached_embeddings)
     #     return vector_store.as_retriever(3)
     # else:
+    #     # 캐싱된 데이터가 없을 경우
+    # 캐싱된 데이터가 없으면 웹에서 새로운 데이터를 로드한다.
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=200)
+    loader = SitemapLoader(url, parsing_function=parse_page)
+    save_loaded_data(loader, faq_caching_web_cache_path_pickle)
+    loader.requests_per_second = 2
+    docs = loader.load_and_split(text_splitter=splitter)
+    cached_embeddings = CacheBackedEmbeddings.from_bytes_store(OpenAIEmbeddings(), faq_caching_embedding_path)
+    vector_store = FAISS.from_documents(docs, cached_embeddings)
+    return vector_store.as_retriever(search_kwargs={"k": 3})
+    
         
 
 st.set_page_config(
