@@ -14,15 +14,21 @@ from langchain.storage import LocalFileStore
 import pickle
 from langchain.callbacks.base import BaseCallbackHandler
 
-project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-faq_caching_embedding_check_path = os.path.join(project_root_path, '.cache/lifecard')
+project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+faq_caching_embedding_check_path = os.path.join(project_root_path, ".cache/lifecard")
 faq_caching_embedding_path = LocalFileStore("./.cache/lifecard/")
-faq_caching_web_cache_folder_path_pickle = os.path.join(project_root_path, '.cache/lifecard_faq_web')
-faq_caching_file_path_pickle = os.path.join(project_root_path, '.cache/lifecard_faq_web/lifecard_faq_web.pkl')
+faq_caching_web_cache_folder_path_pickle = os.path.join(
+    project_root_path, ".cache/lifecard_faq_web"
+)
+faq_caching_file_path_pickle = os.path.join(
+    project_root_path, ".cache/lifecard_faq_web/lifecard_faq_web.pkl"
+)
 life_faq_sitemap_url = "https://lifecard.dga.jp/sitemap.xml"
+
 
 class ChatCallbackHandler(BaseCallbackHandler):
     message = ""
+
     # *args는 일반적으로 받는 모든 인자를 의미
     # **kwargs는 key-value 형태로 받는 모든 인자를 의미(예: a=1, b=2...)
     def on_llm_start(self, *args, **kargs):
@@ -38,9 +44,29 @@ class ChatCallbackHandler(BaseCallbackHandler):
         self.message += token
         self.message_box.markdown(self.message)
 
-llm = ChatOpenAI(
-    temperature=0.1,
-)
+
+def save_message(message, role):
+    st.session_state["messages"].append({"message": message, "role": role})
+
+
+def send_message(message, role, save=True):
+    with st.chat_message(role):
+        st.markdown(message)
+    if save:
+        save_message(message=message, role=role)
+
+
+# 이때까지 입력한 채팅 내역을 출력
+def paint_history():
+    for message in st.session_state["messages"]:
+        send_message(
+            message=message["message"],
+            role=message["role"],
+            save=False,
+        )
+
+
+llm = ChatOpenAI(temperature=0.1, streaming=True, callbacks=[ChatCallbackHandler()])
 
 # Map Re-rank를 실시하는 prompt
 answers_prompt = ChatPromptTemplate.from_template(
@@ -63,18 +89,19 @@ answers_prompt = ChatPromptTemplate.from_template(
 """
 )
 
+
 def save_loaded_data(data, path):
-    with open(path, 'wb') as file:
+    with open(path, "wb") as file:
         pickle.dump(data, file)
 
 
 def open_loaded_data(path):
-    with open(path, 'rb') as file:
+    with open(path, "rb") as file:
         return pickle.load(file)
 
 
 def parse_page(soup):
-    target_soup = soup.find('div', class_="faq-box")
+    target_soup = soup.find("div", class_="faq-box")
     print(target_soup.text)
     return (
         str(target_soup.get_text())
@@ -83,6 +110,7 @@ def parse_page(soup):
         .replace("CloseSearch Submit Blog", "")
     )
 
+
 @st.cache_data(show_spinner="Webページ。からFAQデータを更新中")
 def load_website(url):
     # st.write(faq_caching_web_cache_folder_path_pickle)
@@ -90,8 +118,12 @@ def load_website(url):
     if cached_file:
         print("위에 실행됨")
         # 캐싱된 데이터가 있을 경우
-        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=200)
-        cached_embeddings = CacheBackedEmbeddings.from_bytes_store(OpenAIEmbeddings(), faq_caching_embedding_path)
+        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+            chunk_size=1000, chunk_overlap=200
+        )
+        cached_embeddings = CacheBackedEmbeddings.from_bytes_store(
+            OpenAIEmbeddings(), faq_caching_embedding_path
+        )
         docs = open_loaded_data(faq_caching_file_path_pickle)
         vector_store = FAISS.from_documents(docs, cached_embeddings)
         print("위에 작업 끝")
@@ -101,17 +133,20 @@ def load_website(url):
         print("밑에 실행됨")
         # 캐싱된 데이터가 없을 경우
         # 캐싱된 데이터가 없으면 웹에서 새로운 데이터를 로드한다.
-        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=200)
+        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+            chunk_size=1000, chunk_overlap=200
+        )
         loader = SitemapLoader(url, parsing_function=parse_page)
         loader.requests_per_second = 2
         docs = loader.load_and_split(text_splitter=splitter)
         save_loaded_data(docs, faq_caching_file_path_pickle)
-        cached_embeddings = CacheBackedEmbeddings.from_bytes_store(OpenAIEmbeddings(), faq_caching_embedding_path)
+        cached_embeddings = CacheBackedEmbeddings.from_bytes_store(
+            OpenAIEmbeddings(), faq_caching_embedding_path
+        )
         vector_store = FAISS.from_documents(docs, cached_embeddings)
         print("밑에 작업 끝")
         return vector_store.as_retriever(search_kwargs={"k": 2})
-    
-        
+
 
 st.set_page_config(
     page_title="LifeCardFAQ GPT",
@@ -131,16 +166,16 @@ question = st.chat_input(
 )
 
 if question:
-    with st.chat_message("human"):
-        question
+    paint_history()
+    send_message(message=question, role="human")
     retriever = load_website(life_faq_sitemap_url)
-    chain = ({
-        "context": retriever,
-        "question": RunnablePassthrough()
-    }) | answers_prompt | llm
-
-    result = chain.invoke(question)
+    chain = (
+        ({"context": retriever, "question": RunnablePassthrough()})
+        | answers_prompt
+        | llm
+    )
 
     with st.chat_message("ai"):
-        result.content
-
+        chain.invoke(question)
+else:
+    st.session_state["messages"] = []
