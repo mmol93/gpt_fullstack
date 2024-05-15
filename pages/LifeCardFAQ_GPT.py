@@ -71,25 +71,23 @@ llm = ChatOpenAI(temperature=0.1, streaming=True, callbacks=[ChatCallbackHandler
 # Map Re-rank를 실시하는 prompt
 answers_prompt = ChatPromptTemplate.from_template(
 """
-ユーザーの質問に対する回答は、以下のコンテキストのみを使用して行ってください。コンテキストに該当するSourceがある場合はそのSourceも一緒に返事してください。ない場合はしなくても大丈夫です。
-そのSourceはタイトルを利用し以下のように答えしてください。
-例:
-質問: 月はどのくらいの距離にありますか?
-
-* 月は地球から平均約38万4,400kmの距離にあります。
-* 複数回ログインに失敗し、ログインできない: https://www.exampl.com
-
-普通の挨拶は反応してください。
-
-分からない場合は、「わかりません」と答えるだけで、適当な回答はしないでください。
-例:
-質問: 太陽はどのくらいの距離にありますか?
-わかりません。
-
-返事はMarkdownの*や番号を利用し構造化してください。
+ユーザーの質問に対する回答は、以下のコンテキストのみを使用し以下のルールを絶対に守ってください。
 コンテキスト: {context}
 
-あなたの番です! 
+以下のルールを絶対に守ってください。
+
+1. コンテキストに質問に対する答えがないと思ったら「分かりません。」って言ってください。
+2. コンテキストにあるListで質問に最も適切な項目を選んでそのデータとSourceを一緒に返事してください。
+3. 返事はMarkdownの*を利用し分かりやすくしてください。
+4. 普通の挨拶は挨拶で返事するだけでいい。
+
+例：
+* 複数回ログインに失敗し、ログインできない場合は一定時間空けてから再度お試しください。
+* 制限がかかる可能性があります。
+* パスワードの再設定をしても解除されないことがあります。
+* ログインIDやパスワードを忘れた場合は、カード番号や有効期限、暗証番号、メールアドレスの入力が必要です。暗証番号やメールアドレスが分からない場合はチャットオペレーターにお問い合わせください。
+Link: https://lifecard.dga.jp/faq_detail.html?id=2676
+
 
 質問: {question}
 """
@@ -122,7 +120,6 @@ def load_website(url):
     # st.write(faq_caching_web_cache_folder_path_pickle)
     cached_file = os.listdir(faq_caching_web_cache_folder_path_pickle)
     if cached_file:
-        print("위에 실행됨")
         # 캐싱된 데이터가 있을 경우
         splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             chunk_size=1000, chunk_overlap=200
@@ -132,11 +129,9 @@ def load_website(url):
         )
         docs = open_loaded_data(faq_caching_file_path_pickle)
         vector_store = FAISS.from_documents(docs, cached_embeddings)
-        print("위에 작업 끝")
         # 유사도 결과 상위 2개만 반환하도록 설정
-        return vector_store.as_retriever(search_kwargs={"k": 2})
+        return vector_store.as_retriever(search_kwargs={"k": 3})
     else:
-        print("밑에 실행됨")
         # 캐싱된 데이터가 없을 경우
         # 캐싱된 데이터가 없으면 웹에서 새로운 데이터를 로드한다.
         splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
@@ -151,7 +146,7 @@ def load_website(url):
         )
         vector_store = FAISS.from_documents(docs, cached_embeddings)
         print("밑에 작업 끝")
-        return vector_store.as_retriever(search_kwargs={"k": 2})
+        return vector_store.as_retriever(search_kwargs={"k": 3})
 
 
 st.set_page_config(
