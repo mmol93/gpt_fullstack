@@ -1,7 +1,4 @@
-from typing import Dict, List
-from uuid import UUID
 from langchain.document_loaders import SitemapLoader
-from langchain.schema.output import LLMResult
 from langchain.schema.runnable import RunnableLambda, RunnablePassthrough
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores.faiss import FAISS
@@ -13,6 +10,9 @@ import os
 from langchain.storage import LocalFileStore
 import pickle
 from langchain.callbacks.base import BaseCallbackHandler
+from langchain.chat_models import ChatOpenAI
+import re
+import json
 
 project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 faq_caching_embedding_check_path = os.path.join(project_root_path, ".cache/lifecard")
@@ -45,6 +45,20 @@ class ChatCallbackHandler(BaseCallbackHandler):
         self.message_box.markdown(self.message)
 
 
+def set_retrieval_data(input):
+    docs = input["docs"]
+    return {
+        "question": input["question"],
+        "answers": [
+            {
+                "answer": re.sub(r"\r+", " ", doc.page_content).strip(),
+                "source": re.sub(r"\\n+", "", doc.metadata["source"]).strip(),
+            }
+            for doc in docs
+        ],
+    }
+
+
 def save_message(message, role):
     st.session_state["messages"].append({"message": message, "role": role})
 
@@ -68,31 +82,6 @@ def paint_history():
 
 llm = ChatOpenAI(temperature=0.1, streaming=True, callbacks=[ChatCallbackHandler()])
 
-# Map Re-rank를 실시하는 prompt
-answers_prompt = ChatPromptTemplate.from_template(
-"""
-ユーザーの質問に対する回答は、以下のコンテキストのみを使用し以下のルールを絶対に守ってください。
-コンテキスト: {context}
-
-以下のルールを絶対に守ってください。
-
-1. コンテキストに質問に対する答えがないと思ったら「分かりません。」って言ってください。
-2. コンテキストにあるListで質問に最も適切な項目を選んでそのデータとSourceを一緒に返事してください。
-3. 返事はMarkdownの*を利用し分かりやすくしてください。
-4. 普通の挨拶は挨拶で返事するだけでいい。
-
-例：
-* 複数回ログインに失敗し、ログインできない場合は一定時間空けてから再度お試しください。
-* 制限がかかる可能性があります。
-* パスワードの再設定をしても解除されないことがあります。
-* ログインIDやパスワードを忘れた場合は、カード番号や有効期限、暗証番号、メールアドレスの入力が必要です。暗証番号やメールアドレスが分からない場合はチャットオペレーターにお問い合わせください。
-Link: https://lifecard.dga.jp/faq_detail.html?id=2676
-
-
-質問: {question}
-"""
-)
-
 
 def save_loaded_data(data, path):
     with open(path, "wb") as file:
@@ -115,7 +104,7 @@ def parse_page(soup):
     )
 
 
-@st.cache_data(show_spinner="Webページ。からFAQデータを更新中")
+@st.cache_data(show_spinner="WebページからFAQデータを更新中")
 def load_website(url):
     # st.write(faq_caching_web_cache_folder_path_pickle)
     cached_file = os.listdir(faq_caching_web_cache_folder_path_pickle)
@@ -130,7 +119,7 @@ def load_website(url):
         docs = open_loaded_data(faq_caching_file_path_pickle)
         vector_store = FAISS.from_documents(docs, cached_embeddings)
         # 유사도 결과 상위 2개만 반환하도록 설정
-        return vector_store.as_retriever(search_kwargs={"k": 3})
+        return vector_store.as_retriever(search_kwargs={"k": 4})
     else:
         # 캐싱된 데이터가 없을 경우
         # 캐싱된 데이터가 없으면 웹에서 새로운 데이터를 로드한다.
@@ -145,8 +134,7 @@ def load_website(url):
             OpenAIEmbeddings(), faq_caching_embedding_path
         )
         vector_store = FAISS.from_documents(docs, cached_embeddings)
-        print("밑에 작업 끝")
-        return vector_store.as_retriever(search_kwargs={"k": 3})
+        return vector_store.as_retriever(search_kwargs={"k": 4})
 
 
 st.set_page_config(
@@ -166,14 +154,50 @@ question = st.chat_input(
     "質問内容を入力してください。",
 )
 
+
+def show_answer(input):
+    question = input["question"]
+    answers = json.dumps(input["answers"], ensure_ascii=False)
+    
+    answers_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """
+                コンテキスト: {answers}
+
+                以下のルールを絶対に守って返事してください。
+
+                1. 上のコンテキストにある内容を元にし参考にしたLinkを参考として返事してください。具体的な例は以下の例を参考してください。
+                2. コンテキストにあるデータはanswerとsourceになっている。必ずそれをPairで利用して欲しい。
+                3. 返事は以下の例にあるMarkdown形式を必ず守ってください。
+                4. 普通の挨拶は挨拶で返事するだけでいい。
+
+                例：
+                ## 複数回ログインに失敗し、ログインできない場合は一定時間空けてから再度お試しください。
+                ## 解決方法
+                1. 少しい時間がたったあともう一度試してください。
+                2. そうしてもログインできない場合はチャットや電話お問い合わせを利用してください。
+                ## 参考
+                * https://lifecard.dga.jp/faq_detail.html?id=2676
+                """,
+            ),
+            ("human", "{question}"),
+        ]
+    )
+
+    chain = answers_prompt | llm
+    return chain.invoke({"question": question, "answers": answers})
+
+
 if question:
     paint_history()
     send_message(message=question, role="human")
     retriever = load_website(life_faq_sitemap_url)
     chain = (
-        ({"context": retriever, "question": RunnablePassthrough()})
-        | answers_prompt
-        | llm
+        ({"docs": retriever, "question": RunnablePassthrough()})
+        | RunnableLambda(set_retrieval_data)
+        | RunnableLambda(show_answer)
     )
 
     with st.chat_message("ai"):
