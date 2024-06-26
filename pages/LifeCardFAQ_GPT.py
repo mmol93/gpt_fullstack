@@ -80,7 +80,7 @@ def paint_history():
         )
 
 
-llm = ChatOpenAI(temperature=0.1, streaming=True, callbacks=[ChatCallbackHandler()])
+llm = ChatOpenAI(model='gpt-3.5-turbo-1106', temperature=0.1, streaming=True, callbacks=[ChatCallbackHandler()])
 
 
 def save_loaded_data(data, path):
@@ -161,21 +161,23 @@ def show_answer(input):
             (
                 "system",
                 """
-                コンテキスト: {answers}
+                context: {answers}
 
-                以下のルールを絶対に守って返事してください。
-
-                1. 上のコンテキストにある内容の中で一番正しい内容を元にして返事してください。同じJSON内にあったLinkも一緒に返事してください。
-                2. コンテキストにあるデータはanswerとsourceになっている。必ずそれをPairで利用して欲しい。
-                3. 返事は以下の例にあるMarkdown形式を必ず守ってください。
-
-                例：
+                Please follow this rules.
+                
+                1. Please make sure to select and answer the most appropriate response to the question from the contents in the context.
+                2. You can rewrite the text to make it easier to understand from context.
+                3. Answer must follow markdown and keep format like this. 
+                
+                Example：
                 ## 複数回ログインに失敗し、ログインできない場合は一定時間空けてから再度お試しください。
-                ## 解決方法
+                ### 解決方法
                 1. 少しい時間がたったあともう一度試してください。
                 2. そうしてもログインできない場合はチャットや電話お問い合わせを利用してください。
-                ## 参考
+                3. You must answer with japanese.
+                ### 参考
                 * https://lifecard.dga.jp/faq_detail.html?id=2676
+                
                 """,
             ),
             ("human", "{question}"),
