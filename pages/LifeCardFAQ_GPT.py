@@ -110,9 +110,6 @@ def load_website(url):
     cached_file = os.listdir(faq_caching_web_cache_folder_path_pickle)
     if cached_file:
         # 캐싱된 데이터가 있을 경우
-        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            chunk_size=1000, chunk_overlap=200
-        )
         cached_embeddings = CacheBackedEmbeddings.from_bytes_store(
             OpenAIEmbeddings(), faq_caching_embedding_path
         )
@@ -168,10 +165,9 @@ def show_answer(input):
 
                 以下のルールを絶対に守って返事してください。
 
-                1. 上のコンテキストにある内容を元にし参考にしたLinkを参考として返事してください。具体的な例は以下の例を参考してください。
+                1. 上のコンテキストにある内容の中で一番正しい内容を元にして返事してください。同じJSON内にあったLinkも一緒に返事してください。
                 2. コンテキストにあるデータはanswerとsourceになっている。必ずそれをPairで利用して欲しい。
                 3. 返事は以下の例にあるMarkdown形式を必ず守ってください。
-                4. 普通の挨拶は挨拶で返事するだけでいい。
 
                 例：
                 ## 複数回ログインに失敗し、ログインできない場合は一定時間空けてから再度お試しください。
